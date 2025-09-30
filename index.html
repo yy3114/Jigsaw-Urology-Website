@@ -1,0 +1,763 @@
+```html
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>泌尿系統 36片拼圖遊戲 - 互鎖選區版</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 設置 Inter 字體 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* 淺藍灰色背景 */
+        }
+        /* 拼圖塊的拖曳容器，必須是 relative */
+        #jigsaw-app {
+            position: relative; 
+        }
+        /* 主拼圖格網 (吸附目標) */
+        #puzzle-grid {
+            position: relative;
+            user-select: none;
+            touch-action: none; 
+            box-shadow: 0 10px 30px rgba(44, 62, 80, 0.15);
+            border: 4px solid #3498db; /* 藍色邊框 */
+        }
+        /* 單個拼圖塊的樣式 */
+        .puzzle-piece {
+            /* 初始在托盤中時，使用 relative layout */
+            position: relative; 
+            cursor: grab;
+            transition: box-shadow 0.1s;
+            box-sizing: border-box; 
+            mask-image: none;
+            -webkit-mask-image: none;
+            mask-repeat: no-repeat;
+            -webkit-mask-repeat: no-repeat;
+            /* 修正：在圖片載入前顯示，確認邊界框存在 */
+            background-color: #f5f5f5; 
+            border: 1px solid #ccc; 
+            z-index: 10; 
+            margin: 4px; /* 間距 */
+        }
+        /* 拼圖塊被拖曳時的樣式 (position: absolute) */
+        .puzzle-piece.dragging {
+            position: absolute; 
+            z-index: 100; 
+            cursor: grabbing;
+            box-shadow: 0 0 20px rgba(230, 126, 34, 0.8);
+            transform: scale(1.05); 
+            border: none; /* 拖曳時移除邊框 */
+        }
+        /* 美化計時器樣式 */
+        #timer {
+            background-color: #ffffff;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        #timer:hover {
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex flex-col items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-4xl">
+        <h1 class="text-4xl font-bold text-center mb-2 text-gray-800">🧩 泌尿系統 36片拼圖挑戰 (互鎖選區版)</h1>
+        <p class="text-center mb-6 text-gray-600">從下方托盤選區拖曳拼圖塊至主圖框完成挑戰。</p>
+    </div>
+
+    <div id="jigsaw-app" class="w-full max-w-4xl flex flex-col lg:flex-row gap-6">
+        
+        <!-- 參考圖 & 控制區 (左側/頂部) -->
+        <div class="lg:w-80 flex-shrink-0 order-1">
+            <div class="bg-white p-4 rounded-xl shadow-lg mb-6">
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">參考圖</h2>
+                <!-- 圖片 URL -->
+                <img id="reference-image" src="https://i.postimg.cc/NjbcgTNw/urinary-system2.jpg" alt="泌尿系統參考圖" class="w-full h-auto rounded-lg border-2 border-gray-200">
+            </div>
+
+            <div class="flex flex-col space-y-3">
+                <button id="shuffle-button" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg active:scale-95">
+                    重新洗牌
+                </button>
+                <div id="status-message" class="text-center text-lg font-semibold h-8 text-gray-700">
+                    載入中...
+                </div>
+                <div id="timer" class="text-center text-lg font-semibold text-gray-700">
+                    用時：00:00
+                </div>
+            </div>
+        </div>
+
+        <!-- 拼圖區 (右側/底部) -->
+        <div class="flex-grow flex justify-center items-start p-2 bg-white rounded-xl shadow-lg order-2">
+            <!-- 所有拼圖塊的絕對定位容器，也是吸附的目標 -->
+            <div id="puzzle-grid" class="w-full max-w-full rounded-lg overflow-hidden border-2 border-gray-400">
+                <!-- 成功放置的拼圖塊將被移動到這裡 -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- 拼圖塊選區 (托盤) - 獨立於主格網之外 -->
+    <div class="w-full max-w-4xl mt-6">
+        <!-- 剩餘計數器區域 (頂部) -->
+        <div class="bg-white p-4 rounded-t-xl shadow-lg border-x-2 border-t-2 border-gray-300">
+            <p class="text-xl font-bold text-gray-700">
+                剩餘拼圖：<span id="remaining-count" class="text-blue-600 font-extrabold">36</span> 塊
+            </p>
+        </div>
+
+        <!-- 托盤容器：固定高度 h-48，無水平滾動 -->
+        <div class="bg-white p-4 rounded-b-xl shadow-lg h-48 border-x-2 border-b-2 border-gray-300 overflow-hidden">
+            <!-- 托盤：flex 佈局，自動換行 -->
+            <div id="piece-tray" class="flex flex-wrap items-start justify-start h-full overflow-auto">
+                <!-- 待放置的拼圖塊將被放置在這裡 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 勝利/完成訊息 Modal -->
+    <div id="win-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50 transition-opacity duration-300 opacity-0" aria-modal="true" role="dialog">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl text-center max-w-sm w-full transform scale-95 transition-transform duration-300">
+            <svg class="mx-auto h-16 w-16 text-green-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">恭喜！拼圖完成！</h3>
+            <p class="text-gray-600 mb-6">您成功完成了 36 片互鎖拼圖！</p>
+            <button id="close-modal-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 active:scale-95">
+                關閉並再玩一次
+            </button>
+        </div>
+    </div>
+
+
+    <script>
+        // 設定常數
+        const IMAGE_URL = 'https://i.postimg.cc/NjbcgTNw/urinary-system2.jpg'; 
+        const ROWS = 6; 
+        const COLS = 6; 
+        const SNAP_TOLERANCE = 35;
+        const TAB_OFFSET_FACTOR = 0.15; 
+        const TIME_LIMIT_SECONDS = 600; // 10 分鐘 = 600 秒
+
+        // 獲取 DOM 元素
+        const puzzleGrid = document.getElementById('puzzle-grid');
+        const pieceTray = document.getElementById('piece-tray');
+        const jigsawApp = document.getElementById('jigsaw-app');
+        const shuffleButton = document.getElementById('shuffle-button');
+        const statusMessage = document.getElementById('status-message');
+        const winModal = document.getElementById('win-modal');
+        const closeModalButton = document.getElementById('close-modal-button');
+        const remainingCountElement = document.getElementById('remaining-count');
+        const timerElement = document.getElementById('timer');
+
+        let pieces = [];
+        let pieceEdges = {}; 
+        let gridW = 0; 
+        let gridH = 0; 
+        let pieceWidth = 0; 
+        let pieceHeight = 0; 
+        let tabPadding = 0; 
+        let draggedPiece = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        let pieceBBoxW = 0;
+        let pieceBBoxH = 0;
+        let imageLoaded = false; // 新增：追蹤圖片是否載入
+        let timerInterval = null;
+        let startTime = null;
+        let audioContext = null;
+
+        /**
+         * 啟動計時器
+         */
+        const startTimer = () => {
+            if (timerInterval) clearInterval(timerInterval);
+            startTime = Date.now();
+            timerElement.textContent = '用時：00:00';
+            timerElement.classList.remove('text-red-600');
+            timerInterval = setInterval(updateTimer, 1000);
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        };
+
+        /**
+         * 播放滴答音效 (小聲)
+         */
+        const playTickSound = () => {
+            if (!audioContext) return;
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(800, audioContext.currentTime); // 滴答頻率
+            gainNode.gain.setValueAtTime(0.05, audioContext.currentTime); // 小聲 (音量 5%)
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.05); // 短暫音效
+        };
+
+        /**
+         * 更新計時器顯示
+         */
+        const updateTimer = () => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const seconds = (elapsed % 60).toString().padStart(2, '0');
+            timerElement.textContent = `用時：${minutes}:${seconds}`;
+            if (elapsed >= TIME_LIMIT_SECONDS) {
+                timerElement.classList.add('text-red-600');
+            }
+            playTickSound(); // 每秒播放滴答音效
+        };
+
+        /**
+         * 停止計時器並返回總時間字符串
+         */
+        const stopTimer = () => {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            return { timeString: `${minutes}分${seconds}秒`, isWithinLimit: elapsed < TIME_LIMIT_SECONDS };
+        };
+
+        /**
+         * 隨機洗牌陣列
+         */
+        const shuffleArray = (array) => {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        };
+
+        /**
+         * 隨機生成拼圖塊的邊緣地圖 (凹槽 'in' 或 凸榫 'out')
+         */
+        const generateEdgeMap = () => {
+            pieceEdges = {};
+            const types = ['in', 'out'];
+            
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const index = r * COLS + c;
+                    
+                    if (!pieceEdges[index]) pieceEdges[index] = { top: 'flat', bottom: 'flat', left: 'flat', right: 'flat' };
+                    
+                    // 垂直邊緣
+                    if (r < ROWS - 1) {
+                        const bottomType = types[Math.floor(Math.random() * 2)];
+                        pieceEdges[index].bottom = bottomType;
+                        const nextIndex = (r + 1) * COLS + c;
+                        if (!pieceEdges[nextIndex]) pieceEdges[nextIndex] = { top: 'flat', bottom: 'flat', left: 'flat', right: 'flat' };
+                        pieceEdges[nextIndex].top = (bottomType === 'in' ? 'out' : 'in');
+                    }
+                    
+                    // 水平邊緣
+                    if (c < COLS - 1) {
+                        const rightType = types[Math.floor(Math.random() * 2)];
+                        pieceEdges[index].right = rightType;
+                        const nextIndex = r * COLS + (c + 1);
+                        if (!pieceEdges[nextIndex]) pieceEdges[nextIndex] = { top: 'flat', bottom: 'flat', left: 'flat', right: 'flat' };
+                        pieceEdges[nextIndex].left = (rightType === 'in' ? 'out' : 'in');
+                    }
+                }
+            }
+        };
+
+        /**
+         * 根據邊緣地圖生成單個拼圖塊的 SVG 遮罩路徑
+         */
+        const createPieceSVG = (pieceW, pieceH, edgeMap) => {
+            const T_FACTOR = 0.3; // Tab width 
+            const H_FACTOR = 0.15; // Tab height 
+            const C_FACTOR = 0.05; // Control point factor 
+            const maxOffset = Math.max(pieceW, pieceH) * H_FACTOR;
+            
+            // 基礎尺寸 (不含凸榫)
+            const w = pieceW;
+            const h = pieceH;
+
+            let path = `M 0 0`; // Start at top-left (0, 0)
+
+            const addSidePath = (direction, dim, tabType) => {
+                if (tabType === 'flat') {
+                    if (direction === 'T') return ` L ${w} 0`;
+                    if (direction === 'R') return ` L ${w} ${h}`;
+                    if (direction === 'B') return ` L 0 ${h}`;
+                    if (direction === 'L') return ` L 0 0`;
+                }
+
+                const s = (tabType === 'out' ? 1 : -1); 
+                const T_abs = dim * T_FACTOR; 
+                const H_abs = dim * H_FACTOR * s; 
+                const L_abs = (dim * (1 - T_FACTOR)) / 2; 
+
+                let d_segment = '';
+                
+                // --- Top Edge (X: 0 -> W, Y: 0) ---
+                if (direction === 'T') {
+                    d_segment += ` L ${L_abs} 0`;
+                    d_segment += ` C ${L_abs + T_abs*C_FACTOR} ${H_abs}, ${L_abs + T_abs*(1-C_FACTOR)} ${H_abs}, ${L_abs + T_abs} 0`;
+                    d_segment += ` L ${w} 0`;
+                }
+                
+                // --- Right Edge (X: W, Y: 0 -> H) ---
+                else if (direction === 'R') {
+                    d_segment += ` L ${w} ${L_abs}`;
+                    // 注意：X 軸座標是 w + H_abs，因為 H_abs 是 s * 凸榫高度
+                    d_segment += ` C ${w + H_abs} ${L_abs + T_abs*C_FACTOR}, ${w + H_abs} ${L_abs + T_abs*(1-C_FACTOR)}, ${w} ${L_abs + T_abs}`;
+                    d_segment += ` L ${w} ${h}`;
+                } 
+
+                // --- Bottom Edge (X: W -> 0, Y: H) ---
+                else if (direction === 'B') {
+                    // 這裡的 s_inv 確保了凸榫是向下的 (對於 'in') 或是向上的 (對於 'out')
+                    const s_inv = (tabType === 'out' ? -1 : 1);
+                    const H_inv = dim * H_FACTOR * s_inv; 
+                    
+                    d_segment += ` L ${w - L_abs} ${h}`;
+                    // 注意：Y 軸座標是 h + H_inv
+                    d_segment += ` C ${w - (L_abs + T_abs*C_FACTOR)} ${h + H_inv}, ${w - (L_abs + T_abs*(1-C_FACTOR))} ${h + H_inv}, ${w - L_abs - T_abs} ${h}`;
+                    d_segment += ` L 0 ${h}`;
+                }
+
+                // --- Left Edge (X: 0, Y: H -> 0) ---
+                else if (direction === 'L') {
+                    // 這裡的 s_inv 確保了凸榫是向左的 (對於 'in') 或是向右的 (對於 'out')
+                    const s_inv = (tabType === 'out' ? -1 : 1);
+                    const H_inv = dim * H_FACTOR * s_inv; 
+
+                    d_segment += ` L 0 ${h - L_abs}`;
+                    // 注意：X 軸座標是 H_inv
+                    d_segment += ` C ${H_inv} ${h - (L_abs + T_abs*C_FACTOR)}, ${H_inv} ${h - (L_abs + T_abs*(1-C_FACTOR))}, 0 ${h - L_abs - T_abs}`;
+                    d_segment += ` L 0 0`;
+                }
+                
+                return d_segment;
+            };
+
+            path += addSidePath('T', w, edgeMap.top);
+            path += addSidePath('R', h, edgeMap.right);
+            path += addSidePath('B', w, edgeMap.bottom);
+            path += addSidePath('L', h, edgeMap.left);
+            path += ` Z`;
+
+            // SVG 總尺寸 (包含最大的凸榫偏移)
+            const viewBoxW = w + maxOffset * 2;
+            const viewBoxH = h + maxOffset * 2;
+            const transformX = maxOffset;
+            const transformY = maxOffset;
+            
+            // 修正：Path 需要在 SVG 內部
+            const finalPath = `<path d="${path}" transform="translate(${transformX}, ${transformY})" fill="#000000" />`; // 使用黑色填充作為遮罩
+
+            return `
+                <svg viewBox="0 0 ${viewBoxW} ${viewBoxH}" xmlns="http://www.w3.org/2000/svg" width="${viewBoxW}" height="${viewBoxH}">
+                    ${finalPath}
+                </svg>
+            `;
+        };
+
+        /**
+         * 設置拼圖容器尺寸並計算拼圖塊尺寸
+         */
+        const setSizes = () => {
+            const parentWidth = puzzleGrid.parentElement.clientWidth;
+            // 使用 min(parentWidth, 800) 來限制最大尺寸，但確保在 mobile 寬度下能填滿
+            const actualContainerWidth = parentWidth; 
+
+            // 1. 計算基礎網格尺寸
+            pieceWidth = actualContainerWidth / COLS;
+            pieceHeight = pieceWidth; 
+
+            gridW = actualContainerWidth;
+            gridH = pieceHeight * ROWS;
+            
+            // 2. 設置主格網尺寸
+            puzzleGrid.style.width = `${gridW}px`;
+            puzzleGrid.style.height = `${gridH}px`;
+
+            // 3. 計算凸榫邊界和拼圖塊的實際邊界框 (BBox) 尺寸
+            const maxPieceDim = Math.max(pieceWidth, pieceHeight);
+            tabPadding = maxPieceDim * TAB_OFFSET_FACTOR;
+            pieceBBoxW = pieceWidth + 2 * tabPadding;
+            pieceBBoxH = pieceHeight + 2 * tabPadding;
+            
+            // 4. 更新所有拼圖塊的尺寸和位置數據
+            pieces.forEach(piece => {
+                const c = piece.dataset.index % COLS;
+                const r = Math.floor(piece.dataset.index / COLS);
+                
+                const correctGridX = c * pieceWidth;
+                const correctGridY = r * pieceHeight;
+                
+                // 正確位置 (BBox 相對於 Grid 的位置)
+                const correctX = correctGridX - tabPadding;
+                const correctY = correctGridY - tabPadding;
+                
+                piece.dataset.correctX = correctX;
+                piece.dataset.correctY = correctY;
+                
+                // 設置拼圖塊 BBox 尺寸
+                piece.style.width = `${pieceBBoxW}px`;
+                piece.style.height = `${pieceBBoxH}px`;
+                
+                // 設置背景圖片大小和位置 (僅在圖片載入成功時)
+                if (imageLoaded) {
+                    piece.style.backgroundSize = `${gridW}px ${gridH}px`;
+                    // 修正：backgroundPosition 的偏移量是 (正確網格位置 + tabPadding)
+                    piece.style.backgroundPosition = `-${correctGridX + tabPadding}px -${correctGridY + tabPadding}px`;
+                }
+
+                // 重新生成/應用 SVG 遮罩
+                const edgeMap = pieceEdges[piece.dataset.index];
+                if (edgeMap) {
+                    const svgContent = createPieceSVG(pieceWidth, pieceHeight, edgeMap);
+                    // 修正：使用 encodeURIComponent 確保 SVG 內容正確處理
+                    const encodedSVG = encodeURIComponent(svgContent);
+                    const svgUrl = `url('data:image/svg+xml;charset=utf8,${encodedSVG}')`;
+
+                    piece.style.maskImage = svgUrl;
+                    piece.style.webkitMaskImage = svgUrl;
+                    piece.style.maskSize = `100% 100%`;
+                    piece.style.webkitMaskSize = `100% 100%`;
+                }
+
+                // 如果拼圖塊已經在正確位置 (已吸附)，更新其 style.left/top
+                if (piece.dataset.isCorrect === 'true' && piece.parentElement === puzzleGrid) {
+                    piece.style.left = `${correctX}px`;
+                    piece.style.top = `${correctY}px`;
+                }
+            });
+        };
+
+        /**
+         * 更新剩餘拼圖塊的數量顯示
+         */
+        const updateRemainingCount = () => {
+            const count = pieceTray.children.length;
+            if (remainingCountElement) {
+                remainingCountElement.textContent = count;
+            }
+            if (count > 0) {
+                 statusMessage.textContent = `拖曳拼圖塊 (${count} 塊剩餘)...`;
+            } else {
+                 statusMessage.textContent = '所有拼圖塊已放置。檢查勝利條件...';
+            }
+        };
+
+        /**
+         * 創建並初始化所有拼圖塊
+         */
+        const createPieces = () => {
+            puzzleGrid.innerHTML = '';
+            pieceTray.innerHTML = '';
+            pieces = [];
+            
+            generateEdgeMap(); 
+
+            const img = new Image();
+            img.onload = () => {
+                imageLoaded = true; // 設置圖片載入成功旗標
+                statusMessage.textContent = '圖片載入成功，正在生成拼圖塊...';
+                
+                // 必須在生成拼圖塊之前計算好尺寸
+                setSizes(); 
+                
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        const pieceIndex = r * COLS + c;
+                        const piece = document.createElement('div');
+                        
+                        piece.dataset.index = pieceIndex;
+                        piece.dataset.isCorrect = 'false';
+                        piece.classList.add('puzzle-piece');
+                        
+                        piece.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+                        piece.style.backgroundImage = `url(${IMAGE_URL})`; 
+
+                        pieces.push(piece);
+                        pieceTray.appendChild(piece);
+                    }
+                }
+                
+                // 再次呼叫 setSizes 以確保所有新生成的 piece 獲得正確的尺寸和背景定位
+                setSizes(); 
+                shufflePieces();
+                attachPieceListeners(); 
+                updateRemainingCount(); 
+                startTimer(); // 啟動計時器
+            };
+            img.onerror = () => {
+                imageLoaded = false;
+                statusMessage.textContent = '❌ 圖片載入失敗，請檢查網址或圖片來源。';
+                // 即使圖片失敗，也要初始化空拼圖塊，讓使用者至少可以玩形狀配對
+                setSizes(); 
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        const pieceIndex = r * COLS + c;
+                        const piece = document.createElement('div');
+                        piece.dataset.index = pieceIndex;
+                        piece.dataset.isCorrect = 'false';
+                        piece.classList.add('puzzle-piece');
+                        piece.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+                        pieces.push(piece);
+                        pieceTray.appendChild(piece);
+                    }
+                }
+                setSizes();
+                shufflePieces();
+                attachPieceListeners(); 
+                updateRemainingCount(); 
+                startTimer(); // 啟動計時器
+            }
+            img.src = IMAGE_URL;
+        };
+
+        /**
+         * 將拼圖塊隨機散佈 (此處為放入托盤並洗牌)
+         */
+        const shufflePieces = () => {
+            statusMessage.textContent = '拖曳拼圖塊來完成圖片...';
+            winModal.classList.add('hidden', 'opacity-0', 'scale-95');
+
+            shuffleArray(pieces);
+            
+            // 設定托盤為 flex 佈局，自動換行
+            pieceTray.innerHTML = '';
+            pieces.forEach((piece) => {
+                if (piece.parentElement !== pieceTray) {
+                    pieceTray.appendChild(piece);
+                }
+                piece.dataset.isCorrect = 'false';
+                piece.classList.remove('dragging');
+                piece.style.position = 'relative'; 
+                piece.style.left = '';
+                piece.style.top = '';
+                piece.style.zIndex = '10';
+                piece.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+                piece.style.cursor = 'grab';
+            });
+            
+            updateRemainingCount();
+            checkWin(); 
+        };
+
+        /**
+         * 檢查拼圖是否完成
+         */
+        const checkWin = () => {
+            const piecesInGrid = Array.from(puzzleGrid.children);
+            if (piecesInGrid.length !== ROWS * COLS) return;
+
+            const isFinished = piecesInGrid.every(piece => piece.dataset.isCorrect === 'true');
+            if (isFinished) {
+                const { timeString, isWithinLimit } = stopTimer();
+                if (isWithinLimit) {
+                    statusMessage.textContent = `恭喜完成，好棒棒，很厲害！用時：${timeString}`;
+                } else {
+                    statusMessage.textContent = `🥳 完美！拼圖已完成！用時：${timeString}`;
+                }
+                
+                winModal.classList.remove('hidden');
+                setTimeout(() => {
+                    winModal.classList.add('flex', 'opacity-100', 'scale-100');
+                    winModal.classList.remove('opacity-0', 'scale-95');
+                }, 10);
+                
+                pieces.forEach(piece => {
+                    piece.onmousedown = null;
+                    piece.ontouchstart = null;
+                    piece.style.cursor = 'default';
+                    piece.style.boxShadow = '0 0 15px rgba(46, 204, 113, 0.8)';
+                });
+            }
+        };
+
+        /**
+         * 拖曳開始處理函數
+         */
+        const handleDragStart = (e) => {
+            e.preventDefault(); 
+            draggedPiece = e.currentTarget;
+            
+            const clientX = e.clientX || e.touches[0].clientX;
+            const clientY = e.clientY || e.touches[0].clientY;
+
+            const rect = draggedPiece.getBoundingClientRect();
+            dragOffsetX = clientX - rect.left;
+            dragOffsetY = clientY - rect.top;
+
+            // 關鍵步驟：將拼圖塊移動到主定位上下文 (#jigsaw-app)
+            jigsawApp.appendChild(draggedPiece); 
+            
+            // 將拼圖塊切換為絕對定位，並計算相對於 #jigsaw-app 的起始座標
+            const appRect = jigsawApp.getBoundingClientRect();
+            draggedPiece.style.position = 'absolute'; 
+            draggedPiece.style.left = `${rect.left - appRect.left}px`;
+            draggedPiece.style.top = `${rect.top - appRect.top}px`;
+            
+            draggedPiece.classList.add('dragging');
+            draggedPiece.dataset.isCorrect = 'false';
+            statusMessage.textContent = '正在移動拼圖塊...';
+            
+            document.addEventListener('mousemove', handleDragMove);
+            document.addEventListener('mouseup', handleDragEnd);
+            document.addEventListener('touchmove', handleDragMove, { passive: false });
+            document.addEventListener('touchend', handleDragEnd);
+        };
+
+        /**
+         * 拖曳移動處理函數
+         */
+        const handleDragMove = (e) => {
+            if (!draggedPiece) return;
+
+            if (e.type === 'touchmove') e.preventDefault(); 
+
+            const clientX = e.clientX || e.touches[0].clientX;
+            const clientY = e.clientY || e.touches[0].clientY;
+
+            const appRect = jigsawApp.getBoundingClientRect();
+
+            // 計算新的位置 (相對於 #jigsaw-app)
+            let newX = clientX - appRect.left - dragOffsetX;
+            let newY = clientY - appRect.top - dragOffsetY;
+
+            draggedPiece.style.left = `${newX}px`;
+            draggedPiece.style.top = `${newY}px`;
+        };
+
+        /**
+         * 拖曳結束處理函數
+         */
+        const handleDragEnd = () => {
+            if (!draggedPiece) return;
+
+            const gridRect = puzzleGrid.getBoundingClientRect();
+            const trayRect = pieceTray.getBoundingClientRect();
+
+            // 1. 計算當前拼圖塊位置相對於主格網 (puzzleGrid) 的座標
+            const pieceRect = draggedPiece.getBoundingClientRect();
+            const currentXInGrid = pieceRect.left - gridRect.left;
+            const currentYInGrid = pieceRect.top - gridRect.top;
+
+            const correctX = parseFloat(draggedPiece.dataset.correctX);
+            const correctY = parseFloat(draggedPiece.dataset.correctY);
+            
+            let snapped = false;
+
+            // 2. 檢查是否接近正確位置 (吸附邏輯，只在主區)
+            if (Math.abs(currentXInGrid - correctX) < SNAP_TOLERANCE &&
+                Math.abs(currentYInGrid - correctY) < SNAP_TOLERANCE) {
+                
+                // 檢查該位置是否已經被佔據
+                const isSpotTaken = Array.from(puzzleGrid.children).some(p => {
+                    return p !== draggedPiece && 
+                           p.dataset.isCorrect === 'true' && 
+                           parseFloat(p.dataset.correctX) === correctX &&
+                           parseFloat(p.dataset.correctY) === correctY;
+                });
+
+                if (!isSpotTaken) {
+                    snapped = true;
+                    
+                    // 3. 吸附到正確位置 (切換父元素為 #puzzle-grid)
+                    puzzleGrid.appendChild(draggedPiece);
+                    
+                    draggedPiece.style.position = 'absolute'; // 確保在 Grid 內保持絕對定位
+                    draggedPiece.style.left = `${correctX}px`;
+                    draggedPiece.style.top = `${correctY}px`;
+                    
+                    draggedPiece.dataset.isCorrect = 'true';
+                    draggedPiece.style.zIndex = '1';
+                    draggedPiece.style.boxShadow = '0 0 10px rgba(46, 204, 113, 0.5)';
+                    statusMessage.textContent = '一塊放對了！👍';
+                }
+            }
+            
+            // 4. 清理狀態和位置
+            if (!snapped) {
+                // 未吸附，返回托盤 (恢復相對定位)
+                pieceTray.appendChild(draggedPiece);
+                draggedPiece.dataset.isCorrect = 'false';
+                
+                draggedPiece.style.position = 'relative'; 
+                draggedPiece.style.left = ''; 
+                draggedPiece.style.top = '';
+                draggedPiece.style.zIndex = '10';
+                draggedPiece.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)'; 
+            }
+
+            draggedPiece.classList.remove('dragging');
+            draggedPiece = null;
+
+            document.removeEventListener('mousemove', handleDragMove);
+            document.removeEventListener('mouseup', handleDragEnd);
+            document.removeEventListener('touchmove', handleDragMove);
+            document.removeEventListener('touchend', handleDragEnd);
+            
+            updateRemainingCount(); 
+            checkWin();
+        };
+
+        /**
+         * 附加事件監聽器到所有拼圖塊
+         */
+        const attachPieceListeners = () => {
+            pieces.forEach(piece => {
+                piece.onmousedown = handleDragStart;
+                piece.ontouchstart = handleDragStart;
+            });
+        };
+        
+        /**
+         * 設置視窗大小改變事件和按鈕事件
+         */
+        const setupEventListeners = () => {
+            shuffleButton.addEventListener('click', () => {
+                createPieces();
+                startTimer(); // 重新洗牌時重置計時器
+            }); 
+            closeModalButton.addEventListener('click', () => {
+                winModal.classList.add('opacity-0', 'scale-95');
+                winModal.classList.remove('flex', 'opacity-100', 'scale-100');
+                setTimeout(() => {
+                    winModal.classList.add('hidden');
+                }, 300);
+                createPieces(); 
+            });
+            
+            // 使用 ResizeObserver 來處理響應式佈局
+            const resizeObserver = new ResizeObserver(() => {
+                // 只有當所有拼圖塊初始化完成後才執行 setSizes
+                if (pieces.length === ROWS * COLS) { 
+                    setSizes(); 
+                }
+            });
+
+            // 觀察父容器的尺寸變化
+            resizeObserver.observe(puzzleGrid.parentElement);
+        };
+
+        /**
+         * 啟動遊戲
+         */
+        window.onload = () => {
+            createPieces();
+            setupEventListeners();
+        };
+
+    </script>
+</body>
+</html>
+```
